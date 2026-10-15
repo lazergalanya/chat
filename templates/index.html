@@ -58,13 +58,34 @@
     </div>
 
     <script>
-        let socket;
+        // Socket bağlantısını sayfa açıldığı an (veya global düzeyde) başlatabiliriz 
+        // ya da buton tıklandığında kurup dinleyicileri global tutabiliriz.
+        let socket = io();
         let myUsername = "";
         let selectedUserSid = null;
         let selectedUserName = null;
         let activeTargetSid = null;
-        
         let chatHistories = {};
+
+        // Sayfa yüklendiğinde global socket dinleyicilerini kuruyoruz:
+        socket.on('update_user_list', (users) => {
+            renderUserList(users);
+        });
+
+        socket.on('private_message', (data) => {
+            let partnerSid = (data.sender_sid === socket.id) ? activeTargetSid : data.sender_sid;
+            
+            if (!partnerSid) return;
+
+            if (!chatHistories[partnerSid]) {
+                chatHistories[partnerSid] = [];
+            }
+            chatHistories[partnerSid].push(data);
+
+            if (selectedUserSid === partnerSid) {
+                appendMessageToUI(data.sender_name === myUsername, data.text, data.time);
+            }
+        });
 
         function joinChat() {
             const input = document.getElementById('username-input');
@@ -77,30 +98,8 @@
             document.getElementById('login-modal').style.display = 'none';
             document.getElementById('my-name-display').innerText = myUsername;
 
-            socket = io();
-
-            socket.on('connect', () => {
-                socket.emit('join', myUsername);
-            });
-
-            socket.on('update_user_list', (users) => {
-                renderUserList(users);
-            });
-
-            socket.on('private_message', (data) => {
-                let partnerSid = (data.sender_sid === socket.id) ? activeTargetSid : data.sender_sid;
-                
-                if (!partnerSid) return;
-
-                if (!chatHistories[partnerSid]) {
-                    chatHistories[partnerSid] = [];
-                }
-                chatHistories[partnerSid].push(data);
-
-                if (selectedUserSid === partnerSid) {
-                    appendMessageToUI(data.sender_name === myUsername, data.text, data.time);
-                }
-            });
+            // Sunucuya ismimizi bildirip join olayını tetikliyoruz
+            socket.emit('join', myUsername);
         }
 
         function renderUserList(users) {
@@ -108,6 +107,7 @@
             listContainer.innerHTML = '';
 
             users.forEach(user => {
+                // Kendimizi listede göstermeyelim
                 if (user.sid === socket.id) return;
 
                 const div = document.createElement('div');
@@ -159,14 +159,14 @@
             input.value = '';
         }
 
-        function appendMessageToUI(isMe, text, time) {
+        function appendMessageToUI(isMe, test, time) {
             const container = document.getElementById('chat-messages');
             const div = document.createElement('div');
             div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3`;
             
             div.innerHTML = `
                 <div class="max-w-md rounded-2xl px-4 py-2.5 shadow ${isMe ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-gray-900 text-gray-200 border border-gray-800 rounded-bl-none'}">
-                    <div class="text-sm break-words">${text}</div>
+                    <div class="text-sm break-words">${test}</div>
                     <div class="text-[10px] ${isMe ? 'text-emerald-200' : 'text-gray-400'} text-right mt-1">${time}</div>
                 </div>
             `;
