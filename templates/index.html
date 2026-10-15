@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazerGöz Mesaj</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body class="bg-gray-950 text-gray-100 h-screen flex flex-col">
+
+    <!-- Giriş Modalı -->
+    <div id="login-modal" class="fixed inset-0 bg-black bg-opacity-85 flex items-center justify-center z-50">
+        <div class="bg-gray-900 p-8 rounded-2xl shadow-2xl w-96 text-center border border-gray-800">
+            <h2 class="text-2xl font-bold mb-2 text-emerald-400">⚡ LazerGöz Mesaj</h2>
+            <p class="text-gray-400 text-sm mb-6">Sohbete başlamak için adınızı yazın.</p>
+            <input type="text" id="username-input" placeholder="Adınız..." class="w-full px-4 py-3 bg-gray-950 border border-gray-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white mb-4">
+            <button onclick="joinChat()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition duration-200">Sohbete Gir</button>
+        </div>
+    </div>
+
+    <!-- Ana Ekran (Messenger Layout) -->
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- Sol Kenar Çubuğu: Kullanıcı Listesi -->
+        <aside class="w-80 bg-gray-900 border-r border-gray-800 flex flex-col">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center">
+                <h1 class="font-bold text-emerald-400">⚡ LazerGöz Sohbetler</h1>
+                <span id="my-name-display" class="text-xs bg-gray-800 px-2 py-1 rounded text-gray-300"></span>
+            </div>
+            <div id="user-list" class="flex-1 overflow-y-auto divide-y divide-gray-800/50">
+                <!-- Kullanıcılar buraya dinamik eklenecek -->
+            </div>
+        </aside>
+
+        <!-- Sağ Taraf: Aktif Sohbet Alanı -->
+        <main class="flex-1 flex flex-col bg-gray-950">
+            <!-- Sohbet Başlığı -->
+            <header id="chat-header" class="bg-gray-900 border-b border-gray-800 p-4 font-semibold text-gray-400 flex items-center">
+                Lütfen sol taraftan mesajlaşmak istediğiniz bir kişiyi seçin.
+            </header>
+
+            <!-- Mesaj Akışı -->
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-6 space-y-4 flex flex-col">
+                <div class="m-auto text-center text-gray-600">
+                    <p class="text-lg">Bir sohbet seçin ve mesajlaşmaya başlayın.</p>
+                </div>
+            </div>
+
+            <!-- Mesaj Gönderme Formu (Başlangıçta Gizli) -->
+            <footer id="chat-footer" class="bg-gray-900 border-t border-gray-800 p-4 hidden">
+                <form onsubmit="sendPrivateMessage(event)" class="flex gap-3">
+                    <input type="text" id="message-input" autocomplete="off" placeholder="Mesajınızı yazın..." class="flex-1 px-4 py-3 bg-gray-950 border border-gray-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white">
+                    <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-xl font-semibold transition duration-200">Gönder</button>
+                </form>
+            </footer>
+        </main>
+    </div>
+
+    <script>
+        let socket;
+        let myUsername = "";
+        let selectedUserSid = null;
+        let selectedUserName = null;
+        let activeTargetSid = null;
+        
+        let chatHistories = {};
+
+        function joinChat() {
+            const input = document.getElementById('username-input');
+            myUsername = input.value.trim();
+            if (!myUsername) {
+                alert("Lütfen adınızı girin!");
+                return;
+            }
+
+            document.getElementById('login-modal').style.display = 'none';
+            document.getElementById('my-name-display').innerText = myUsername;
+
+            socket = io();
+
+            socket.on('connect', () => {
+                socket.emit('join', myUsername);
+            });
+
+            socket.on('update_user_list', (users) => {
+                renderUserList(users);
+            });
+
+            socket.on('private_message', (data) => {
+                let partnerSid = (data.sender_sid === socket.id) ? activeTargetSid : data.sender_sid;
+                
+                if (!partnerSid) return;
+
+                if (!chatHistories[partnerSid]) {
+                    chatHistories[partnerSid] = [];
+                }
+                chatHistories[partnerSid].push(data);
+
+                if (selectedUserSid === partnerSid) {
+                    appendMessageToUI(data.sender_name === myUsername, data.text, data.time);
+                }
+            });
+        }
+
+        function renderUserList(users) {
+            const listContainer = document.getElementById('user-list');
+            listContainer.innerHTML = '';
+
+            users.forEach(user => {
+                if (user.sid === socket.id) return;
+
+                const div = document.createElement('div');
+                div.className = `p-4 flex items-center gap-3 cursor-pointer transition hover:bg-gray-800/60 ${selectedUserSid === user.sid ? 'bg-gray-800 border-l-4 border-emerald-500' : ''}`;
+                div.onclick = () => selectUser(user.sid, user.username);
+                
+                div.innerHTML = `
+                    <div class="w-10 h-10 rounded-full bg-emerald-600/30 text-emerald-400 flex items-center justify-center font-bold">
+                        ${user.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                        <div class="font-medium text-sm text-gray-200">${user.username}</div>
+                        <div class="text-xs text-emerald-500 flex items-center gap-1 mt-0.5">● Çevrimiçi</div>
+                    </div>
+                `;
+                listContainer.appendChild(div);
+            });
+        }
+
+        function selectUser(sid, username) {
+            selectedUserSid = sid;
+            activeTargetSid = sid;
+            selectedUserName = username;
+
+            document.getElementById('chat-header').innerHTML = `Sohbet Ediliyor: <span class="text-emerald-400 ml-1 font-bold">${username}</span>`;
+            document.getElementById('chat-footer').classList.remove('hidden');
+
+            const messagesContainer = document.getElementById('chat-messages');
+            messagesContainer.innerHTML = '';
+
+            if (chatHistories[sid]) {
+                chatHistories[sid].forEach(msg => {
+                    appendMessageToUI(msg.sender_name === myUsername, msg.text, msg.time);
+                });
+            }
+        }
+
+        function sendPrivateMessage(e) {
+            e.preventDefault();
+            const input = document.getElementById('message-input');
+            const text = input.value.trim();
+            if (!text || !selectedUserSid) return;
+
+            socket.emit('private_message', {
+                recipient_sid: selectedUserSid,
+                text: text
+            });
+
+            input.value = '';
+        }
+
+        function appendMessageToUI(isMe, text, time) {
+            const container = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = `flex flex-col ${isMe ? 'items-end' : 'items-start'} mb-3`;
+            
+            div.innerHTML = `
+                <div class="max-w-md rounded-2xl px-4 py-2.5 shadow ${isMe ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-gray-900 text-gray-200 border border-gray-800 rounded-bl-none'}">
+                    <div class="text-sm break-words">${text}</div>
+                    <div class="text-[10px] ${isMe ? 'text-emerald-200' : 'text-gray-400'} text-right mt-1">${time}</div>
+                </div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+    </script>
+</body>
+</html>
